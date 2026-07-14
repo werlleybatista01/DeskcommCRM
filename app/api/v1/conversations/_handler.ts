@@ -8,10 +8,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { ApiError } from "@/lib/api/types";
 import type { Actor, HandlerCtx } from "@/lib/api/handlers/types";
 import { audit } from "@/lib/audit";
-import type {
-  ListConversationsQuery,
-  UpdateConversationStatusInput,
-} from "@/lib/schemas";
+import type { ListConversationsQuery, UpdateConversationStatusInput } from "@/lib/schemas";
 import type { Conversation } from "@/lib/types/messaging";
 
 type SB = SupabaseClient;
@@ -22,7 +19,7 @@ const SELECT_COLS = `
   last_outbound_at, last_message_at, last_message_preview,
   unread_count_for_assignee, is_group, group_chat_id, metadata,
   created_at, updated_at,
-  contacts:contact_id (id, display_name, name, phone_number, avatar_url, is_anonymized, tags, is_blocked)
+  contacts:contact_id (id, display_name, name, phone_number, avatar_url, is_anonymized, tags, is_blocked, blocked_reason)
 `;
 
 interface CursorPayload {
@@ -133,9 +130,7 @@ export async function listConversationsHandler(
   const page = hasMore ? rows.slice(0, q.limit) : rows;
   const last = page[page.length - 1];
   const cursor =
-    hasMore && last
-      ? encodeCursor({ last_message_at: last.last_message_at, id: last.id })
-      : null;
+    hasMore && last ? encodeCursor({ last_message_at: last.last_message_at, id: last.id }) : null;
 
   return { conversations: page, cursor, has_more: hasMore };
 }

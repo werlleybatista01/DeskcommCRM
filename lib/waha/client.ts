@@ -19,6 +19,13 @@ export interface WahaContactProfile {
   isMe?: boolean;
 }
 
+export interface WahaFile {
+  mimetype: string;
+  filename?: string;
+  data?: string;
+  url?: string;
+}
+
 export class WahaClient {
   constructor(
     private readonly baseUrl: string,
@@ -105,16 +112,58 @@ export class WahaClient {
   }
 
   async sendMessage(session: string, chatId: string, text: string): Promise<unknown> {
-    const res = await fetch(`${this.baseUrl}/api/sendText`, {
+    return this.postJson("/api/sendText", { session, chatId, text });
+  }
+
+  async sendMedia(input: {
+    session: string;
+    chatId: string;
+    type: "image" | "audio" | "video" | "document";
+    file: WahaFile;
+    caption?: string;
+  }): Promise<unknown> {
+    const endpoint = {
+      image: "/api/sendImage",
+      audio: "/api/sendVoice",
+      video: "/api/sendVideo",
+      document: "/api/sendFile",
+    }[input.type];
+    return this.postJson(endpoint, {
+      session: input.session,
+      chatId: input.chatId,
+      file: input.file,
+      ...(input.caption ? { caption: input.caption } : {}),
+      ...(input.type === "audio" || input.type === "video" ? { convert: true } : {}),
+    });
+  }
+
+  private async postJson(path: string, body: Record<string, unknown>): Promise<unknown> {
+    const res = await fetch(`${this.baseUrl}${path}`, {
       method: "POST",
       headers: {
         "X-Api-Key": this.apiKey,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ session, chatId, text }),
+      body: JSON.stringify(body),
     });
     if (!res.ok) throw new Error(`waha_${res.status}`);
     return res.json();
+  }
+
+  async downloadMedia(url: string, maxBytes = 32 * 1024 * 1024): Promise<Response> {
+    const configured = new URL(this.baseUrl);
+    const requested = new URL(url, this.baseUrl);
+    // O WAHA costuma publicar localhost no webhook. Usamos apenas path/query e
+    // forçamos a origem configurada, impedindo SSRF e mantendo a API key interna.
+    const safeUrl = new URL(requested.pathname + requested.search, configured);
+    const res = await fetch(safeUrl, {
+      headers: { "X-Api-Key": this.apiKey },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!res.ok) throw new Error(`waha_media_${res.status}`);
+    const length = Number(res.headers.get("content-length") ?? "0");
+    if (length > maxBytes) throw new Error("waha_media_too_large");
+    return res;
   }
 
   private async getJson<T>(path: string, timeoutMs = 1_200): Promise<T | null> {
