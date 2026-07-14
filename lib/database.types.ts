@@ -669,6 +669,7 @@ export type Database = {
       contacts: {
         Row: {
           anonymized_at: string | null
+          avatar_url: string | null
           birthdate: string | null
           blocked_at: string | null
           blocked_reason: string | null
@@ -696,6 +697,7 @@ export type Database = {
         }
         Insert: {
           anonymized_at?: string | null
+          avatar_url?: string | null
           birthdate?: string | null
           blocked_at?: string | null
           blocked_reason?: string | null
@@ -723,6 +725,7 @@ export type Database = {
         }
         Update: {
           anonymized_at?: string | null
+          avatar_url?: string | null
           birthdate?: string | null
           blocked_at?: string | null
           blocked_reason?: string | null
@@ -2181,4 +2184,3 @@ export const Constants = {
     Enums: {},
   },
 } as const
-

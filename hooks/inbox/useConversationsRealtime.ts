@@ -11,6 +11,7 @@ export interface ContactSummary {
   display_name: string | null;
   name: string | null;
   phone_number: string | null;
+  avatar_url: string | null;
   tags: string[];
   is_blocked: boolean;
   is_anonymized: boolean;
@@ -59,6 +60,9 @@ export function useConversationsRealtime(
     },
     getNextPageParam: (last) =>
       last.meta?.has_more && last.meta.cursor ? last.meta.cursor : undefined,
+    // Safety net for temporary WebSocket failures; Realtime remains the fast path.
+    refetchInterval: 30_000,
+    refetchIntervalInBackground: false,
   });
 
   const onChange = useCallback(() => {

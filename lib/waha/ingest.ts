@@ -14,12 +14,15 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { audit } from "@/lib/audit";
 import type { createAdminClient } from "@/lib/supabase/admin";
 import { ackToStatus } from "@/lib/types/messaging";
+import { getWahaClient } from "@/lib/waha/client";
+import { remoteNameFromContact, remoteNameFromEvent } from "@/lib/waha/contact-profile";
 
 type Admin = ReturnType<typeof createAdminClient>;
 
 interface Session {
   id: string;
   organization_id: string;
+  waha_session_name: string;
 }
 
 export interface WahaPayload {
@@ -126,8 +129,44 @@ function mapWahaMessageType(raw: string | undefined): string {
   return WA_TYPE_MAP[raw.toLowerCase()] ?? "text";
 }
 
-function notifyNameOf(p: WahaPayload): string | null {
-  return p._data?.notifyName ?? p._data?.pushName ?? null;
+interface ResolvedRemoteContact {
+  identity: ChatIdentity;
+  sourceLid: string | null;
+  displayName: string | null;
+  avatarUrl: string | null;
+}
+
+async function resolveRemoteContact(
+  session: Session,
+  chatId: string,
+  payload: WahaPayload,
+): Promise<ResolvedRemoteContact> {
+  const original = parseChatId(chatId);
+  const fallback: ResolvedRemoteContact = {
+    identity: original,
+    sourceLid: original.kind === "lid" ? original.lid : null,
+    displayName: remoteNameFromEvent(payload),
+    avatarUrl: null,
+  };
+  const waha = getWahaClient();
+  if (!waha || original.kind === "group") return fallback;
+
+  const [contact, picture, mappedPhone] = await Promise.all([
+    waha.getContact(session.waha_session_name, chatId),
+    waha.getContactPicture(session.waha_session_name, chatId),
+    original.kind === "lid"
+      ? waha.getPhoneByLid(session.waha_session_name, `${original.lid}@lid`)
+      : Promise.resolve(null),
+  ]);
+
+  const phoneChatId = mappedPhone ?? (contact?.number ? `${contact.number}@c.us` : null);
+  const mappedIdentity = phoneChatId ? parseChatId(phoneChatId) : original;
+  return {
+    identity: mappedIdentity.kind === "phone" ? mappedIdentity : original,
+    sourceLid: original.kind === "lid" ? original.lid : null,
+    displayName: remoteNameFromContact(contact) ?? fallback.displayName,
+    avatarUrl: picture,
+  };
 }
 
 /**
@@ -140,13 +179,15 @@ async function upsertContact(
   parsed: ChatIdentity,
   chatId: string,
   notifyName: string | null,
+  sourceLid: string | null = null,
+  avatarUrl: string | null = null,
 ): Promise<string | null> {
   if (parsed.kind === "group") return null;
   const { data, error } = await admin.rpc("fn_upsert_wa_contact" as never, {
     p_org: orgId,
     p_kind: parsed.kind,
     p_phone: parsed.kind === "phone" ? parsed.phone : null,
-    p_lid: parsed.kind === "lid" ? parsed.lid : null,
+    p_lid: sourceLid ?? (parsed.kind === "lid" ? parsed.lid : null),
     p_chat_id: chatId,
     p_notify: notifyName,
   } as never);
@@ -154,7 +195,16 @@ async function upsertContact(
     console.error("[waha.ingest] fn_upsert_wa_contact failed", error.message);
     return null;
   }
-  return (data as string) ?? null;
+  const contactId = (data as string) ?? null;
+  if (contactId && avatarUrl) {
+    const { error: avatarError } = await admin
+      .from("contacts")
+      .update({ avatar_url: avatarUrl })
+      .eq("id", contactId)
+      .eq("organization_id", orgId);
+    if (avatarError) console.error("[waha.ingest] contact avatar update failed", avatarError.message);
+  }
+  return contactId;
 }
 
 async function upsertConversation(
@@ -207,7 +257,16 @@ async function handleInbound(
   // WAHA emite eventos vazios p/ status/read-receipt/presence — não viram mensagem.
   if (!p.body && !p.mediaUrl && !p.hasMedia) return;
 
-  const contactId = await upsertContact(admin, session.organization_id, parsed, chatId, notifyNameOf(p));
+  const remote = await resolveRemoteContact(session, chatId, p);
+  const contactId = await upsertContact(
+    admin,
+    session.organization_id,
+    remote.identity,
+    chatId,
+    remote.displayName,
+    remote.sourceLid,
+    remote.avatarUrl,
+  );
   if (!contactId) return;
   const conversationId = await upsertConversation(admin, session.organization_id, contactId, session.id);
   if (!conversationId) return;
@@ -308,7 +367,16 @@ async function handleOutboundFromUserPhone(
   if (!p.id || !chatId) return;
   if (!p.body && !p.mediaUrl && !p.hasMedia) return;
 
-  const contactId = await upsertContact(admin, session.organization_id, parsed, chatId, notifyNameOf(p));
+  const remote = await resolveRemoteContact(session, chatId, p);
+  const contactId = await upsertContact(
+    admin,
+    session.organization_id,
+    remote.identity,
+    chatId,
+    remote.displayName,
+    remote.sourceLid,
+    remote.avatarUrl,
+  );
   if (!contactId) return;
   const conversationId = await upsertConversation(admin, session.organization_id, contactId, session.id);
   if (!conversationId) return;
