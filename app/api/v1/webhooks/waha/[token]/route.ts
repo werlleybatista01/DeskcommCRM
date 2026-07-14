@@ -16,6 +16,7 @@ import { fail, ok } from "@/lib/api/wrappers";
 import { audit } from "@/lib/audit";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { dispatchWahaEvent, verifyHmacSha512, type WahaEnvelope } from "@/lib/waha/ingest";
+import { decryptWahaWebhookSecret } from "@/lib/waha/secret";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -57,25 +58,17 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
     return fail("not_found", "unknown webhook token", 404, { requestId });
   }
 
-  // HMAC (best-effort: se fn_decrypt_oauth falhar — ex. seed dev sem cripto —
-  // loga e pula para o MVP).
+  // HMAC obrigatório: falha de configuração ou assinatura nunca libera o payload.
   const sigHeader = req.headers.get("x-webhook-hmac") ?? req.headers.get("X-Webhook-Hmac");
-  let validSignature = false;
-  let hmacSkipped = false;
+  let webhookSecret: string;
   try {
-    const dec = await admin.rpc("fn_decrypt_oauth", {
-      ciphertext: session.webhook_secret_encrypted,
-    });
-    if (dec.error || !dec.data) {
-      hmacSkipped = true;
-    } else {
-      validSignature = verifyHmacSha512(rawBody, sigHeader, dec.data as string);
-    }
+    webhookSecret = decryptWahaWebhookSecret(session.webhook_secret_encrypted);
   } catch {
-    hmacSkipped = true;
+    return fail("internal_error", "webhook_secret_unavailable", 503, { requestId });
   }
 
-  if (!hmacSkipped && !validSignature) {
+  const validSignature = verifyHmacSha512(rawBody, sigHeader, webhookSecret);
+  if (!validSignature) {
     await audit({
       action: "nuvemshop.webhook_invalid_signature",
       organizationId: session.organization_id,
@@ -103,7 +96,7 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
     raw_body: rawBody,
     payload_parsed: envelope as unknown as Record<string, unknown>,
     signature_header: sigHeader ?? null,
-    valid_signature: validSignature || hmacSkipped,
+    valid_signature: validSignature,
     event_type: eventType,
     external_id: externalId,
     status: "received",

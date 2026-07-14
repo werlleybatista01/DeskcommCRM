@@ -16,6 +16,8 @@ import { ROLE_RANK } from "@/lib/auth/types";
 import { createChannelSchema } from "@/lib/schemas/channels";
 import { createClient } from "@/lib/supabase/server";
 import { getWahaClient, wahaFriendlyError } from "@/lib/waha/client";
+import { encryptWahaWebhookSecret } from "@/lib/waha/secret";
+import { createSessionWebhook } from "@/lib/waha/session-webhook";
 
 export const dynamic = "force-dynamic";
 
@@ -47,7 +49,9 @@ export async function POST(req: NextRequest): Promise<Response> {
   const activeOrg = await resolveActiveOrg(user);
   if (!activeOrg) return fail("forbidden_tenant", "Nenhuma organização ativa.", 403, { requestId });
   if (!user.is_platform_admin && ROLE_RANK[activeOrg.role] < ROLE_RANK.admin) {
-    return fail("forbidden_role", "Apenas administradores podem conectar números.", 403, { requestId });
+    return fail("forbidden_role", "Apenas administradores podem conectar números.", 403, {
+      requestId,
+    });
   }
 
   const waha = getWahaClient();
@@ -58,6 +62,14 @@ export async function POST(req: NextRequest): Promise<Response> {
       503,
       { requestId },
     );
+  }
+
+  let webhookMaterial: ReturnType<typeof createSessionWebhook>;
+  try {
+    webhookMaterial = createSessionWebhook(process.env.WAHA_WEBHOOK_BASE_URL ?? "");
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "invalid_webhook_configuration";
+    return fail("waha_webhook_not_configured", message, 503, { requestId });
   }
 
   let raw: unknown = {};
@@ -75,6 +87,17 @@ export async function POST(req: NextRequest): Promise<Response> {
   }
 
   const supabase = await createClient();
+  let encryptedSecret: string;
+  try {
+    encryptedSecret = encryptWahaWebhookSecret(webhookMaterial.hmacSecret);
+  } catch {
+    return fail(
+      "waha_webhook_secret_encryption_failed",
+      "Não foi possível proteger o segredo do webhook.",
+      500,
+      { requestId },
+    );
+  }
   // Nome de sessão único por canal — o hardcode `org_<8>` era 1 número por org.
   const sessionName = `org_${activeOrg.orgId.slice(0, 8)}_${randomUUID().replace(/-/g, "").slice(0, 6)}`;
 
@@ -85,8 +108,8 @@ export async function POST(req: NextRequest): Promise<Response> {
       waha_session_name: sessionName,
       display_name: parsed.data.display_name ?? null,
       engine: "NOWEB",
-      webhook_path_token: randomUUID().replace(/-/g, ""),
-      webhook_secret_encrypted: Buffer.from([0]),
+      webhook_path_token: webhookMaterial.pathToken,
+      webhook_secret_encrypted: encryptedSecret,
       status: "STARTING",
       last_status_change_at: new Date().toISOString(),
       consecutive_health_fails: 0,
@@ -96,11 +119,13 @@ export async function POST(req: NextRequest): Promise<Response> {
     .select(CHANNEL_COLUMNS)
     .single();
   if (insErr || !created) {
-    return fail("internal_error", insErr?.message ?? "channel_session_insert_failed", 500, { requestId });
+    return fail("internal_error", insErr?.message ?? "channel_session_insert_failed", 500, {
+      requestId,
+    });
   }
 
   try {
-    await waha.startSession(sessionName);
+    await waha.startSession(sessionName, { webhook: webhookMaterial.webhook });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "unknown";
     // Rollback: sem WAHA no ar, não deixamos um canal fantasma preso em STARTING.
