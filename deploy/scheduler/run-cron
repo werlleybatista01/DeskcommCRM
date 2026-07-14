@@ -1,0 +1,24 @@
+#!/bin/sh
+set -eu
+
+. /run/deskcomm-scheduler.env
+
+job="${1:-}"
+case "$job" in
+  storage-redaction|lgpd-sla-watcher) ;;
+  *) echo "invalid scheduler job" >&2; exit 64 ;;
+esac
+
+url="${CRM_INTERNAL_URL%/}/api/v1/cron/${job}"
+
+if curl --fail --silent --show-error \
+  --max-time 15 \
+  --retry 0 \
+  --header "Authorization: Bearer ${INTERNAL_CRON_SECRET}" \
+  "$url" >/dev/null; then
+  echo "$(date -u +%FT%TZ) job=${job} status=ok"
+else
+  code=$?
+  echo "$(date -u +%FT%TZ) job=${job} status=error exit=${code}" >&2
+  exit "$code"
+fi
