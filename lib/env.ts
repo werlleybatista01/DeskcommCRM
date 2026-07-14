@@ -60,10 +60,12 @@ const schema = z.object({
    */
   AI_CRED_AES_KEY: required("AI_CRED_AES_KEY"),
 
-  // WAHA
-  WAHA_API_BASE_URL: required("WAHA_API_BASE_URL"),
-  WAHA_API_KEY: required("WAHA_API_KEY"),
-  WAHA_WEBHOOK_BASE_URL: required("WAHA_WEBHOOK_BASE_URL"),
+  // WAHA — opcional no primeiro boot controlado. Quando ausente, os clientes
+  // retornam null e o health check marca o serviço como degraded, sem derrubar o app.
+  // A integração só será preenchida depois da validação do WAHA existente.
+  WAHA_API_BASE_URL: z.string().optional().default(""),
+  WAHA_API_KEY: z.string().optional().default(""),
+  WAHA_WEBHOOK_BASE_URL: z.string().optional().default(""),
 
   // Upstash Redis
   UPSTASH_REDIS_REST_URL: required("UPSTASH_REDIS_REST_URL"),
