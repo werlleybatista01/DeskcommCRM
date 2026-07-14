@@ -1339,6 +1339,7 @@ CREATE TABLE IF NOT EXISTS "public"."contacts" (
     "organization_id" "uuid" NOT NULL,
     "name" "text",
     "display_name" "text",
+    "avatar_url" "text",
     "email" "text",
     "email_normalized" "text" GENERATED ALWAYS AS ("lower"(TRIM(BOTH FROM "email"))) STORED,
     "phone_number" "text",
@@ -4158,13 +4159,43 @@ create or replace function public.fn_upsert_wa_contact(
 ) returns uuid language plpgsql security definer set search_path = public as $$
 declare v_id uuid;
 begin
+  if p_lid is not null then
+    select id into v_id
+    from public.contacts
+    where organization_id = p_org
+      and is_merged_into is null
+      and source_metadata->>'waha_lid' = regexp_replace(p_lid, '@.*$', '')
+    limit 1
+    for update;
+
+    if v_id is not null then
+      update public.contacts set
+        phone_number = coalesce(case when p_kind = 'phone' then p_phone end, phone_number),
+        display_name = coalesce(nullif(p_notify, ''), display_name),
+        source_metadata = source_metadata || jsonb_strip_nulls(jsonb_build_object(
+          'waha_lid', regexp_replace(p_lid, '@.*$', ''),
+          'waha_chat_id', p_chat_id,
+          'notify_name', nullif(p_notify, '')
+        )),
+        updated_at = now()
+      where id = v_id;
+      return v_id;
+    end if;
+  end if;
+
   insert into public.contacts (organization_id, phone_number, source, consent, tags, source_metadata, display_name)
   values (p_org, case when p_kind = 'phone' then p_phone end, 'whatsapp', '{}'::jsonb, '{}'::text[],
-    case when p_kind = 'lid' then jsonb_build_object('waha_lid', p_lid, 'notify_name', nullif(p_notify, ''))
-      else jsonb_build_object('waha_chat_id', p_chat_id, 'notify_name', nullif(p_notify, '')) end,
+    jsonb_strip_nulls(jsonb_build_object(
+      'waha_lid', case when p_lid is not null then regexp_replace(p_lid, '@.*$', '') end,
+      'waha_chat_id', p_chat_id,
+      'notify_name', nullif(p_notify, '')
+    )),
     nullif(p_notify, ''))
   on conflict (organization_id, wa_identity) where wa_identity is not null and is_merged_into is null
-  do update set display_name = coalesce(contacts.display_name, excluded.display_name), updated_at = now()
+  do update set
+    display_name = coalesce(excluded.display_name, contacts.display_name),
+    source_metadata = contacts.source_metadata || excluded.source_metadata,
+    updated_at = now()
   returning id into v_id;
   return v_id;
 end; $$;

@@ -2,7 +2,7 @@
 import { format, formatDistanceToNowStrict } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Robot } from "@/lib/ui/icons";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { ConversationWithContact } from "@/hooks/inbox/useConversationsRealtime";
@@ -73,6 +73,7 @@ export function ConversationListItem({ conversation, isSelected, onSelect }: Pro
     >
       <div className="relative shrink-0">
         <Avatar className="h-10 w-10">
+          {c?.avatar_url && <AvatarImage src={c.avatar_url} alt={displayName} />}
           <AvatarFallback className="text-xs">
             {initials(displayName, phoneFallback)}
           </AvatarFallback>

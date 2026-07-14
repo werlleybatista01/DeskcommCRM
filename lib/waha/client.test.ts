@@ -49,3 +49,40 @@ describe("WahaClient.startSession", () => {
     expect(fetchMock.mock.calls[2]![0]).toBe("http://waha:3000/api/sessions/crm-session/start");
   });
 });
+
+describe("WahaClient contact enrichment", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("loads the remote contact, picture and LID mapping without exposing the API key", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: "5511999999999@c.us", name: "Cliente" }), {
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ profilePictureURL: "https://example.com/avatar.jpg" }), {
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ pn: "5511999999999@c.us" }), { status: 200 }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new WahaClient("http://waha:3000", "api-key");
+
+    await expect(client.getContact("crm-session", "123@lid")).resolves.toMatchObject({
+      name: "Cliente",
+    });
+    await expect(client.getContactPicture("crm-session", "123@lid")).resolves.toBe(
+      "https://example.com/avatar.jpg",
+    );
+    await expect(client.getPhoneByLid("crm-session", "123@lid")).resolves.toBe(
+      "5511999999999@c.us",
+    );
+
+    expect(fetchMock.mock.calls[2]![0]).toBe("http://waha:3000/api/crm-session/lids/123%40lid");
+    expect(fetchMock.mock.calls[0]![1].headers).toEqual({ "X-Api-Key": "api-key" });
+  });
+});

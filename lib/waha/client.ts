@@ -10,6 +10,15 @@
  */
 import { buildWahaSessionConfig, type WahaSessionWebhook } from "./session-webhook";
 
+export interface WahaContactProfile {
+  id?: string;
+  number?: string;
+  name?: string;
+  pushname?: string;
+  shortName?: string;
+  isMe?: boolean;
+}
+
 export class WahaClient {
   constructor(
     private readonly baseUrl: string,
@@ -106,6 +115,39 @@ export class WahaClient {
     });
     if (!res.ok) throw new Error(`waha_${res.status}`);
     return res.json();
+  }
+
+  private async getJson<T>(path: string, timeoutMs = 1_200): Promise<T | null> {
+    try {
+      const res = await fetch(`${this.baseUrl}${path}`, {
+        headers: { "X-Api-Key": this.apiKey },
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (!res.ok) return null;
+      return (await res.json()) as T;
+    } catch {
+      return null;
+    }
+  }
+
+  async getContact(session: string, chatId: string): Promise<WahaContactProfile | null> {
+    const qs = new URLSearchParams({ session, contactId: chatId });
+    return this.getJson<WahaContactProfile>(`/api/contacts?${qs.toString()}`);
+  }
+
+  async getContactPicture(session: string, chatId: string): Promise<string | null> {
+    const qs = new URLSearchParams({ session, contactId: chatId });
+    const data = await this.getJson<{ profilePictureURL?: string | null }>(
+      `/api/contacts/profile-picture?${qs.toString()}`,
+    );
+    return data?.profilePictureURL ?? null;
+  }
+
+  async getPhoneByLid(session: string, lid: string): Promise<string | null> {
+    const data = await this.getJson<{ pn?: string | null }>(
+      `/api/${encodeURIComponent(session)}/lids/${encodeURIComponent(lid)}`,
+    );
+    return data?.pn ?? null;
   }
 }
 
