@@ -8,6 +8,8 @@
  * stored in container env). Plaintext-then-hash is NOT used in this version.
  * So WAHA_API_KEY in .env.local IS the hex hash.
  */
+import type { WahaSessionWebhook } from "./session-webhook";
+
 export class WahaClient {
   constructor(
     private readonly baseUrl: string,
@@ -20,27 +22,44 @@ export class WahaClient {
    *   POST /api/sessions               → create (422 if exists)
    *   POST /api/sessions/{name}/start  → start (422 if already starting/working)
    */
-  async startSession(name: string): Promise<{ qr?: string; status: string }> {
+  async startSession(
+    name: string,
+    options?: { webhook?: WahaSessionWebhook },
+  ): Promise<{ qr?: string; status: string }> {
     // 1) Create session (ignore 422/409 = already exists)
     const createRes = await fetch(`${this.baseUrl}/api/sessions`, {
       method: "POST",
       headers: { "X-Api-Key": this.apiKey, "Content-Type": "application/json" },
-      body: JSON.stringify({ name, config: {} }),
+      body: JSON.stringify({
+        name,
+        config: options?.webhook ? { webhooks: [options.webhook] } : {},
+      }),
     });
     if (!createRes.ok && createRes.status !== 422 && createRes.status !== 409) {
       const body = await createRes.text().catch(() => "");
       throw new Error(`waha_create_${createRes.status}: ${body.slice(0, 200)}`);
     }
 
-    // 2) Start session
-    const startRes = await fetch(
-      `${this.baseUrl}/api/sessions/${encodeURIComponent(name)}/start`,
-      {
-        method: "POST",
+    // A CRM-owned session may already exist after a retry/redeploy. Re-apply
+    // its per-session webhook without changing the global n8n webhook.
+    if ([422, 409].includes(createRes.status) && options?.webhook) {
+      const updateRes = await fetch(`${this.baseUrl}/api/sessions/${encodeURIComponent(name)}`, {
+        method: "PUT",
         headers: { "X-Api-Key": this.apiKey, "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      },
-    );
+        body: JSON.stringify({ name, config: { webhooks: [options.webhook] } }),
+      });
+      if (!updateRes.ok) {
+        const body = await updateRes.text().catch(() => "");
+        throw new Error(`waha_update_${updateRes.status}: ${body.slice(0, 200)}`);
+      }
+    }
+
+    // 2) Start session
+    const startRes = await fetch(`${this.baseUrl}/api/sessions/${encodeURIComponent(name)}/start`, {
+      method: "POST",
+      headers: { "X-Api-Key": this.apiKey, "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
     if (!startRes.ok && startRes.status !== 422 && startRes.status !== 409) {
       const body = await startRes.text().catch(() => "");
       throw new Error(`waha_start_${startRes.status}: ${body.slice(0, 200)}`);
@@ -57,14 +76,11 @@ export class WahaClient {
    * are treated as success so callers can compose reconnect = stop + start.
    */
   async stopSession(name: string): Promise<void> {
-    const res = await fetch(
-      `${this.baseUrl}/api/sessions/${encodeURIComponent(name)}/stop`,
-      {
-        method: "POST",
-        headers: { "X-Api-Key": this.apiKey, "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      },
-    );
+    const res = await fetch(`${this.baseUrl}/api/sessions/${encodeURIComponent(name)}/stop`, {
+      method: "POST",
+      headers: { "X-Api-Key": this.apiKey, "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
     if (!res.ok && ![404, 422, 409].includes(res.status)) {
       const body = await res.text().catch(() => "");
       throw new Error(`waha_stop_${res.status}: ${body.slice(0, 200)}`);
