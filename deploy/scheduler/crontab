@@ -1,0 +1,5 @@
+# Storage deletion queue: bounded call every 15 minutes.
+*/15 * * * * /usr/local/bin/run-cron storage-redaction
+
+# LGPD deadline watcher: once per hour, offset to avoid minute-zero bursts.
+7 * * * * /usr/local/bin/run-cron lgpd-sla-watcher
