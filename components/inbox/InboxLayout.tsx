@@ -126,6 +126,7 @@ export function InboxLayout({ initialSelectedId = null }: InboxLayoutProps = {})
             <Composer
               ref={composerRef}
               conversationId={selectedConversation.id}
+              contactId={selectedConversation.contact_id}
               blockedReason={blockedReason}
               disabled={selectedConversation.status === "closed"}
             />

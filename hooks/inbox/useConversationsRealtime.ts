@@ -14,6 +14,7 @@ export interface ContactSummary {
   avatar_url: string | null;
   tags: string[];
   is_blocked: boolean;
+  blocked_reason: string | null;
   is_anonymized: boolean;
 }
 
@@ -33,10 +34,7 @@ interface ListResponse {
   meta?: { cursor?: string | null; has_more?: boolean };
 }
 
-export function useConversationsRealtime(
-  filters: ConversationsFilters,
-  orgId: string | null,
-) {
+export function useConversationsRealtime(filters: ConversationsFilters, orgId: string | null) {
   const qc = useQueryClient();
   const queryKey = ["conversations", filters] as const;
 

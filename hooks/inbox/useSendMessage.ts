@@ -9,6 +9,8 @@ interface SendArgs {
   body?: string;
   media_url?: string;
   media_mime?: string;
+  media_data?: string;
+  media_filename?: string;
   type?: string;
 }
 

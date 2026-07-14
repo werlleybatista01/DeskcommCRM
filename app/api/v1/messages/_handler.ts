@@ -7,12 +7,14 @@
  *  - MCP tools (S-13.04)
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { randomUUID } from "node:crypto";
 
 import { ApiError } from "@/lib/api/types";
 import type { Actor, HandlerCtx } from "@/lib/api/handlers/types";
 import { audit } from "@/lib/audit";
 import type { ListMessagesQuery, SendMessageInput } from "@/lib/schemas";
 import type { Message } from "@/lib/types/messaging";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { getWahaClient } from "@/lib/waha/client";
 import { resolveWahaChatId } from "@/lib/waha/send";
 
@@ -98,8 +100,7 @@ export async function listMessagesHandler(
   const hasMore = rows.length > q.limit;
   const page = hasMore ? rows.slice(0, q.limit) : rows;
   const last = page[page.length - 1];
-  const cursor =
-    hasMore && last ? encodeMsgCursor({ sent_at: last.sent_at, id: last.id }) : null;
+  const cursor = hasMore && last ? encodeMsgCursor({ sent_at: last.sent_at, id: last.id }) : null;
 
   return { messages: page, cursor, has_more: hasMore };
 }
@@ -112,6 +113,15 @@ function previewFrom(input: { body?: string; media_url?: string; type?: string }
   if (input.body) return input.body.slice(0, 280);
   if (input.media_url) return `[${input.type ?? "media"}]`;
   return "";
+}
+
+function extractBase64(raw: string): string {
+  const comma = raw.indexOf(",");
+  return raw.startsWith("data:") && comma >= 0 ? raw.slice(comma + 1) : raw;
+}
+
+function safeMediaName(raw: string | undefined): string {
+  return (raw ?? "arquivo").replace(/[^a-zA-Z0-9._-]/g, "_").slice(-180) || "arquivo";
 }
 
 export async function sendMessageHandler(
@@ -141,7 +151,11 @@ export async function sendMessageHandler(
     channel_session_id: string;
     is_group: boolean;
     group_chat_id: string | null;
-    contacts: { phone_number: string | null; wa_identity: string | null; is_blocked: boolean } | null;
+    contacts: {
+      phone_number: string | null;
+      wa_identity: string | null;
+      is_blocked: boolean;
+    } | null;
     channel_sessions: { waha_session_name: string; status: string } | null;
   };
   const c = conv as unknown as Joined;
@@ -156,6 +170,39 @@ export async function sendMessageHandler(
     );
   }
 
+  let mediaStoragePath: string | null = null;
+  let mediaSizeBytes: number | null = null;
+  if (input.media_data) {
+    const buffer = Buffer.from(extractBase64(input.media_data), "base64");
+    if (buffer.byteLength === 0 || buffer.byteLength > 32 * 1024 * 1024) {
+      throw new ApiError(
+        413,
+        "invalid_request",
+        undefined,
+        ctx.requestId,
+        "Arquivo inválido ou maior que 32 MB.",
+      );
+    }
+    mediaStoragePath = `${c.organization_id}/${c.id}/${randomUUID()}-${safeMediaName(input.media_filename)}`;
+    const admin = createAdminClient();
+    const { error: uploadError } = await admin.storage
+      .from("whatsapp-media")
+      .upload(mediaStoragePath, buffer, {
+        contentType: input.media_mime ?? "application/octet-stream",
+        upsert: false,
+      });
+    if (uploadError) {
+      throw new ApiError(
+        503,
+        "internal_error",
+        undefined,
+        ctx.requestId,
+        "Não foi possível armazenar o arquivo.",
+      );
+    }
+    mediaSizeBytes = buffer.byteLength;
+  }
+
   const now = new Date().toISOString();
   const insertRow = {
     organization_id: c.organization_id,
@@ -168,11 +215,14 @@ export async function sendMessageHandler(
     body: input.body ?? null,
     media_url: input.media_url ?? null,
     media_mime: input.media_mime ?? null,
+    media_storage_path: mediaStoragePath,
+    media_size_bytes: mediaSizeBytes,
     sent_via: ctx.actor.type === "ai_agent" ? ("ai" as const) : ("user" as const),
     sent_by_user_id: ctx.actor.type === "user" ? ctx.actor.id : null,
     sent_at: now,
     metadata: {
       ...(input.metadata ?? {}),
+      ...(input.media_filename ? { media_filename: input.media_filename } : {}),
       ...(ctx.actor.type === "ai_agent" ? { ai_actor_id: ctx.actor.id } : {}),
     },
   };
@@ -239,11 +289,25 @@ export async function sendMessageHandler(
     if (updated) message = updated as unknown as Message;
   } else {
     try {
-      const wahaRes = (await waha.sendMessage(
-        c.channel_sessions.waha_session_name,
-        chatId,
-        input.body ?? "",
-      )) as { id?: string | { _serialized?: string } };
+      const hasMedia = Boolean(input.media_data || input.media_url);
+      const mediaTypes = new Set(["image", "audio", "video", "document"]);
+      const wahaRes = (
+        hasMedia && mediaTypes.has(input.type)
+          ? await waha.sendMedia({
+              session: c.channel_sessions.waha_session_name,
+              chatId,
+              type: input.type as "image" | "audio" | "video" | "document",
+              file: {
+                mimetype: input.media_mime ?? "application/octet-stream",
+                ...(input.media_filename ? { filename: input.media_filename } : {}),
+                ...(input.media_data
+                  ? { data: extractBase64(input.media_data) }
+                  : { url: input.media_url! }),
+              },
+              caption: input.body,
+            })
+          : await waha.sendMessage(c.channel_sessions.waha_session_name, chatId, input.body ?? "")
+      ) as { id?: string | { _serialized?: string } };
       // WAHA/NOWEB returns `id` as a WAMessageKey object ({fromMe, remote, id,
       // _serialized}), not a plain string — storing it raw got JSON-stringified
       // into external_id, which never matched the plain-string id the WAHA

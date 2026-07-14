@@ -42,13 +42,32 @@ export const sendMessageSchema = z
     conversation_id: z.string().uuid(),
     type: messageTypeSchema.default("text"),
     body: z.string().min(1).max(4096).optional(),
-    media_url: z.string().url().optional(),
-    media_mime: z.string().optional(),
+    media_url: z
+      .string()
+      .url()
+      .refine((value) => value.startsWith("https://"), "media_url must use https")
+      .optional(),
+    media_mime: z
+      .string()
+      .min(3)
+      .max(150)
+      .regex(/^[\w.+-]+\/[\w.+-]+(?:;\s*[\w.+-]+=[\w.+-]+)*$/)
+      .optional(),
+    media_data: z
+      .string()
+      .max(45_000_000)
+      .regex(/^(?:data:[^,]+;base64,)?[A-Za-z0-9+/]+={0,2}$/)
+      .optional(),
+    media_filename: z.string().min(1).max(255).optional(),
     metadata: z.record(z.string(), z.unknown()).optional(),
   })
-  .refine((d) => !!d.body || !!d.media_url, {
-    message: "body or media_url required",
+  .refine((d) => !!d.body || !!d.media_url || !!d.media_data, {
+    message: "body or media required",
     path: ["body"],
+  })
+  .refine((d) => !d.media_data || !!d.media_mime, {
+    message: "media_mime required with media_data",
+    path: ["media_mime"],
   });
 
 export type SendMessageInput = z.infer<typeof sendMessageSchema>;

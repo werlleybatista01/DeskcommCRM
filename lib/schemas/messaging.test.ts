@@ -38,6 +38,26 @@ describe("sendMessageSchema", () => {
     expect(r.success).toBe(true);
   });
 
+  it("aceita mídia base64 quando o MIME é informado", () => {
+    const r = sendMessageSchema.safeParse({
+      conversation_id: "11111111-1111-4111-8111-111111111111",
+      type: "audio",
+      media_data: "data:audio/ogg;base64,QUJD",
+      media_mime: "audio/ogg",
+      media_filename: "voz.ogg",
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("rejeita mídia base64 sem MIME", () => {
+    const r = sendMessageSchema.safeParse({
+      conversation_id: "11111111-1111-4111-8111-111111111111",
+      type: "document",
+      media_data: "QUJD",
+    });
+    expect(r.success).toBe(false);
+  });
+
   it("rejeita body acima do limite de 4096", () => {
     const r = sendMessageSchema.safeParse({
       conversation_id: "11111111-1111-4111-8111-111111111111",
