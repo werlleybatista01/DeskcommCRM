@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { decryptWahaWebhookSecret, encryptWahaWebhookSecret } from "./secret";
-import { buildSessionWebhook, createSessionWebhook } from "./session-webhook";
+import {
+  buildSessionWebhook,
+  buildWahaSessionConfig,
+  CRM_WAHA_ENGINE,
+  createSessionWebhook,
+} from "./session-webhook";
 
 describe("WAHA per-session webhook", () => {
   const previousKey = process.env.WAHA_BYO_ENCRYPTION_KEY;
@@ -26,6 +31,11 @@ describe("WAHA per-session webhook", () => {
     ]);
     expect(result.hmacSecret).toHaveLength(64);
     expect(result.webhook.hmac.key).toBe(result.hmacSecret);
+    expect(CRM_WAHA_ENGINE).toBe("WEBJS");
+    expect(buildWahaSessionConfig(result.webhook)).toEqual({
+      webhooks: [result.webhook],
+      webjs: { tagsEventsOn: true },
+    });
   });
 
   it("rejects an insecure public webhook URL", () => {
