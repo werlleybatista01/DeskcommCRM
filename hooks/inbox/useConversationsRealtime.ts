@@ -60,6 +60,9 @@ export function useConversationsRealtime(
     },
     getNextPageParam: (last) =>
       last.meta?.has_more && last.meta.cursor ? last.meta.cursor : undefined,
+    // Safety net for temporary WebSocket failures; Realtime remains the fast path.
+    refetchInterval: 30_000,
+    refetchIntervalInBackground: false,
   });
 
   const onChange = useCallback(() => {

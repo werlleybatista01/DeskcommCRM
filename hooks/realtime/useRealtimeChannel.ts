@@ -48,42 +48,59 @@ export function useRealtimeChannel(opts: UseRealtimeChannelOpts): { status: Real
     }
     const supabase = createClient();
     const channelName = `${name}::${instanceId}`;
-    let channel: RealtimeChannel | null = supabase.channel(channelName);
+    let channel: RealtimeChannel | null = null;
+    let cancelled = false;
 
     const handler = (payload: unknown) => {
       onChangeRef.current(payload);
     };
 
-    if (postgresChanges) {
-      channel = channel.on(
-        "postgres_changes",
-        {
-          event: postgresChanges.event,
-          schema: postgresChanges.schema ?? "public",
-          table: postgresChanges.table,
-          ...(postgresChanges.filter ? { filter: postgresChanges.filter } : {}),
-        },
-        handler,
-      );
-    }
-
-    if (broadcast) {
-      channel = channel.on("broadcast", { event: broadcast.event }, handler);
-    }
-
     setStatus("connecting");
-    channel.subscribe((s) => {
-      // s is one of "SUBSCRIBED" | "CHANNEL_ERROR" | "TIMED_OUT" | "CLOSED"
-      const map: Record<string, RealtimeStatus> = {
-        SUBSCRIBED: "subscribed",
-        CHANNEL_ERROR: "channel_error",
-        TIMED_OUT: "timed_out",
-        CLOSED: "closed",
-      };
-      setStatus(map[s] ?? "connecting");
+    void (async () => {
+      // The SSR browser client may restore its cookie after the socket starts.
+      // Set the JWT explicitly before subscribing so Realtime evaluates RLS as
+      // `authenticated`, never as the anon API role.
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (cancelled) return;
+      await supabase.realtime.setAuth(session?.access_token);
+      if (cancelled) return;
+
+      channel = supabase.channel(channelName);
+      if (postgresChanges) {
+        channel = channel.on(
+          "postgres_changes",
+          {
+            event: postgresChanges.event,
+            schema: postgresChanges.schema ?? "public",
+            table: postgresChanges.table,
+            ...(postgresChanges.filter ? { filter: postgresChanges.filter } : {}),
+          },
+          handler,
+        );
+      }
+
+      if (broadcast) {
+        channel = channel.on("broadcast", { event: broadcast.event }, handler);
+      }
+
+      channel.subscribe((s) => {
+        // s is one of "SUBSCRIBED" | "CHANNEL_ERROR" | "TIMED_OUT" | "CLOSED"
+        const map: Record<string, RealtimeStatus> = {
+          SUBSCRIBED: "subscribed",
+          CHANNEL_ERROR: "channel_error",
+          TIMED_OUT: "timed_out",
+          CLOSED: "closed",
+        };
+        setStatus(map[s] ?? "connecting");
+      });
+    })().catch(() => {
+      if (!cancelled) setStatus("channel_error");
     });
 
     return () => {
+      cancelled = true;
       if (channel) {
         supabase.removeChannel(channel);
         channel = null;

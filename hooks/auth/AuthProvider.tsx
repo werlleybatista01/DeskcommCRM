@@ -34,6 +34,19 @@ export function AuthProvider({
   const [refreshing, setRefreshing] = useState(false);
   const supabaseRef = useRef(createClient());
 
+  // Keep the Realtime socket on the same authenticated JWT as the browser
+  // session, including token refreshes. Without this, Postgres Changes can be
+  // evaluated as `anon` and fail RLS even while normal page requests work.
+  useEffect(() => {
+    const supabase = supabaseRef.current;
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      void supabase.realtime.setAuth(session?.access_token);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
   // Refresh session every 40 minutes (JWT default 1h, with margin).
   useEffect(() => {
     const interval = setInterval(
