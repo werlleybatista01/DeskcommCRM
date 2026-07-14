@@ -8,6 +8,8 @@ export const WAHA_SESSION_WEBHOOK_EVENTS = [
   "state.change",
 ] as const;
 
+export const CRM_WAHA_ENGINE = "WEBJS" as const;
+
 export interface WahaSessionWebhook {
   url: string;
   events: string[];
@@ -23,6 +25,14 @@ export interface NewSessionWebhook {
   pathToken: string;
   hmacSecret: string;
   webhook: WahaSessionWebhook;
+}
+
+export function buildWahaSessionConfig(webhook: WahaSessionWebhook) {
+  return {
+    webhooks: [webhook],
+    // WEBJS only emits message.ack reliably when tag events are enabled.
+    webjs: { tagsEventsOn: true },
+  };
 }
 
 export function buildSessionWebhook(
