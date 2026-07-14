@@ -8,7 +8,7 @@
  * stored in container env). Plaintext-then-hash is NOT used in this version.
  * So WAHA_API_KEY in .env.local IS the hex hash.
  */
-import type { WahaSessionWebhook } from "./session-webhook";
+import { buildWahaSessionConfig, type WahaSessionWebhook } from "./session-webhook";
 
 export class WahaClient {
   constructor(
@@ -32,7 +32,7 @@ export class WahaClient {
       headers: { "X-Api-Key": this.apiKey, "Content-Type": "application/json" },
       body: JSON.stringify({
         name,
-        config: options?.webhook ? { webhooks: [options.webhook] } : {},
+        config: options?.webhook ? buildWahaSessionConfig(options.webhook) : {},
       }),
     });
     if (!createRes.ok && createRes.status !== 422 && createRes.status !== 409) {
@@ -46,7 +46,7 @@ export class WahaClient {
       const updateRes = await fetch(`${this.baseUrl}/api/sessions/${encodeURIComponent(name)}`, {
         method: "PUT",
         headers: { "X-Api-Key": this.apiKey, "Content-Type": "application/json" },
-        body: JSON.stringify({ name, config: { webhooks: [options.webhook] } }),
+        body: JSON.stringify({ name, config: buildWahaSessionConfig(options.webhook) }),
       });
       if (!updateRes.ok) {
         const body = await updateRes.text().catch(() => "");

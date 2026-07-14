@@ -17,7 +17,7 @@ import { createChannelSchema } from "@/lib/schemas/channels";
 import { createClient } from "@/lib/supabase/server";
 import { getWahaClient, wahaFriendlyError } from "@/lib/waha/client";
 import { encryptWahaWebhookSecret } from "@/lib/waha/secret";
-import { createSessionWebhook } from "@/lib/waha/session-webhook";
+import { CRM_WAHA_ENGINE, createSessionWebhook } from "@/lib/waha/session-webhook";
 
 export const dynamic = "force-dynamic";
 
@@ -107,7 +107,7 @@ export async function POST(req: NextRequest): Promise<Response> {
       organization_id: activeOrg.orgId,
       waha_session_name: sessionName,
       display_name: parsed.data.display_name ?? null,
-      engine: "NOWEB",
+      engine: CRM_WAHA_ENGINE,
       webhook_path_token: webhookMaterial.pathToken,
       webhook_secret_encrypted: encryptedSecret,
       status: "STARTING",

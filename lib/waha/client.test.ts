@@ -18,13 +18,13 @@ describe("WahaClient.startSession", () => {
       webhook,
     });
 
-    const createRequest = fetchMock.mock.calls[0];
+    const createRequest = fetchMock.mock.calls[0]!;
     expect(createRequest[0]).toBe("http://waha:3000/api/sessions");
     expect(JSON.parse(createRequest[1].body)).toEqual({
       name: "crm-session",
-      config: { webhooks: [webhook] },
+      config: { webhooks: [webhook], webjs: { tagsEventsOn: true } },
     });
-    expect(fetchMock.mock.calls[1][0]).toBe("http://waha:3000/api/sessions/crm-session/start");
+    expect(fetchMock.mock.calls[1]![0]).toBe("http://waha:3000/api/sessions/crm-session/start");
   });
 
   it("updates the CRM-owned session webhook when the session already exists", async () => {
@@ -40,8 +40,12 @@ describe("WahaClient.startSession", () => {
       webhook,
     });
 
-    expect(fetchMock.mock.calls[1][0]).toBe("http://waha:3000/api/sessions/crm-session");
-    expect(fetchMock.mock.calls[1][1].method).toBe("PUT");
-    expect(fetchMock.mock.calls[2][0]).toBe("http://waha:3000/api/sessions/crm-session/start");
+    expect(fetchMock.mock.calls[1]![0]).toBe("http://waha:3000/api/sessions/crm-session");
+    expect(fetchMock.mock.calls[1]![1].method).toBe("PUT");
+    expect(JSON.parse(fetchMock.mock.calls[1]![1].body)).toEqual({
+      name: "crm-session",
+      config: { webhooks: [webhook], webjs: { tagsEventsOn: true } },
+    });
+    expect(fetchMock.mock.calls[2]![0]).toBe("http://waha:3000/api/sessions/crm-session/start");
   });
 });
