@@ -5,6 +5,7 @@ import { getWahaClient } from "@/lib/waha/client";
 import { decryptWahaWebhookSecret, encryptWahaWebhookSecret } from "@/lib/waha/secret";
 import {
   buildSessionWebhook,
+  CRM_WAHA_ENGINE,
   createSessionWebhook,
   type WahaSessionWebhook,
 } from "@/lib/waha/session-webhook";
@@ -59,7 +60,7 @@ async function ensureChannelSession(
     .insert({
       organization_id: orgId,
       waha_session_name: sessionName,
-      engine: "NOWEB",
+      engine: CRM_WAHA_ENGINE,
       webhook_path_token: webhookMaterial.pathToken,
       webhook_secret_encrypted: encryptWahaWebhookSecret(webhookMaterial.hmacSecret),
       status: "STARTING",
